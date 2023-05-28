@@ -537,7 +537,7 @@ def return_message():
                 content += '\n参考资料：'
                 source = list(set(source))
                 for i in source:
-                    content += ('\n'+ "[{}] ".format(str(i+1)) + result["source_documents"][i].metadata)
+                    content += ('\n'+ "[{}] ".format(str(i+1)) + str(result["source_documents"][i].metadata))
                     # print(result["source_documents"][i].metadata)
 
 
