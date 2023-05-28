@@ -728,10 +728,10 @@ if __name__ == '__main__':
     llm("怎么评价人工智能")
 
     from langchain.document_loaders import Docx2txtLoader
-    loader = Docx2txtLoader("./drive/MyDrive/知识库你问我答.docx")
+    loader = Docx2txtLoader("./知识库你问我答.docx")
     data = loader.load()
 
-    loader = Docx2txtLoader("./drive/MyDrive/接诉即办你问我答.docx")
+    loader = Docx2txtLoader("./接诉即办你问我答.docx")
     new_data = loader.load()
 
     text_splitter = CharacterTextSplitter(separator = "。\n\n",chunk_size=20, chunk_overlap=0)
@@ -749,7 +749,7 @@ if __name__ == '__main__':
         def load(self):
             docs = []
             for i in range(5):
-                f = open('./drive/MyDrive/json_data/new_json_{}.json'.format(str(i)), 'r')
+                f = open('./json_data/new_json_{}.json'.format(str(i)), 'r')
                 content = f.read()
                 content = json.loads(content)
                 for item in content['custom']['infoList']:
