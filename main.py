@@ -510,8 +510,37 @@ def return_message():
                 #                                        chat_with_history)
                 # content = "可以"
                 query = send_message
-                content = chain({"query":query+"(必须用中文回答,禁止大量输出英文。如果没有答案，输出：我不知道)"})
-                content = content['result']
+                result = chain({"query":query})
+                content = result['result']
+
+                from rouge import Rouge
+                a = result["result"].split("。")
+                a.remove('')
+                rouge = Rouge()
+                source = []
+                for sub_string in a:
+                    tmp_score = []
+                    for i in range(len(result["source_documents"])):
+                        sub_doc = result["source_documents"][i]
+                        rouge_score = rouge.get_scores([' '.join(list(sub_string))], [' '.join(list(sub_doc.page_content))])
+                        tmp_score.append(rouge_score[0]["rouge-l"]['f'])
+                    source.append(tmp_score.index(max(tmp_score)))
+
+                final_res = ''
+                for i in range(len(a)-1):
+                    if source[i]==source[i+1]:
+                        final_res += (a[i]+',')
+                    else:
+                        final_res += (a[i]+'。'+'[{}]'.format(str(source[i]+1)))
+                final_res += (a[-1]+'。'+ '[{}]'.format(str(source[-1]+1)))
+
+                content += '\n参考资料：'
+                source = list(set(source))
+                for i in source:
+                    content += ('\n'+ "[{}] ".format(str(i+1)) + result["source_documents"][i].metadata)
+                    # print(result["source_documents"][i].metadata)
+
+
                 print(f"用户({session.get('user_id')})得到的回复消息:{content[:40]}...")
                 if chat_with_history:
                     user_info['chats'][chat_id]['have_chat_context'] += 1
@@ -697,18 +726,70 @@ if __name__ == '__main__':
     
     llm = OpenAI(model_name="gpt-3.5-turbo",max_tokens=102)
     llm("怎么评价人工智能")
-    loader = PyPDFLoader("./实习守则.pdf")
-    # pages = loader.load_and_split()
-    pages = loader.load()
-    #基于seperator划分，如果两个seperator之间的距离大于chunk_size,该chunk的size会大于chunk_size
-    text_splitter = CharacterTextSplitter( separator = "\n \n",chunk_size=500, chunk_overlap=0)
-    #先基于seperators[0]划分，如果两个seperators[0]之间的距离大于chunk_size，使用seperators[1]继续划分......
-    # text_splitter = RecursiveCharacterTextSplitter( separators = ["\n \n","。",",",],chunk_size=500, chunk_overlap=0)
-    split_docs = text_splitter.split_documents(pages)
+
+    from langchain.document_loaders import Docx2txtLoader
+    loader = Docx2txtLoader("./drive/MyDrive/知识库你问我答.docx")
+    data = loader.load()
+
+    loader = Docx2txtLoader("./drive/MyDrive/接诉即办你问我答.docx")
+    new_data = loader.load()
+
+    text_splitter = CharacterTextSplitter(separator = "。\n\n",chunk_size=20, chunk_overlap=0)
+    split_docs = text_splitter.split_documents(data)
+
+    split_docs.extend(text_splitter.split_documents(new_data))
+
+    from langchain.document_loaders.base import BaseLoader
+    from langchain.docstore.document import Document
+    import json
+    class json_loader(BaseLoader):
+
+        def __init__(self) -> None:
+            super().__init__()
+        def load(self):
+            docs = []
+            for i in range(5):
+                f = open('./drive/MyDrive/json_data/new_json_{}.json'.format(str(i)), 'r')
+                content = f.read()
+                content = json.loads(content)
+                for item in content['custom']['infoList']:
+                    doc = Document(page_content=item['kinfoName']+'\n\n'+item['kinfoContent'],metadata={'标题':item['kinfoName'],'链接':"https://www.jingmen.gov.cn/col/col18658/index.html?kinfoGuid="+item['kinfoGuid']})
+                    docs.append(doc)
+            return docs
+    loader = json_loader()
+    data = loader.load()
+    # print(data[0])
+    # print(len(data))
+    split_docs.extend(data)
+
     print("chunk numbers :{}".format(len(split_docs)))
+ 
     embeddings = OpenAIEmbeddings()
     docsearch = Chroma.from_documents(split_docs, embeddings)
+ 
     print("完成向量化")
-    chain = VectorDBQA.from_chain_type(llm=OpenAI(model_name="gpt-3.5-turbo",max_tokens=500,temperature=0), chain_type="stuff", vectorstore=docsearch,return_source_documents=True)
+    
+    from langchain.prompts import PromptTemplate
+    prompt_template = """使用以下 文本 来回答最后的 问题。
+    如果你不知道答案，只回答"未找到答案"，不要编造答案。
+    如果你的答案不是来自 文本 ，只回答"未在知识库中找到答案"，不要根据你已有的知识回答。
+    答案应该尽量流畅自然，答案应该尽量完整。
+    如果你的答案来源于 文本 ，你必须一字不漏地呈现文本内容！
+    你必须使用中文回答。
+
+    文本: {context}
+
+    问题: {question}
+    中文答案:"""
+    PROMPT = PromptTemplate(
+        template=prompt_template, input_variables=["context", "question"]
+    )
+
+    from langchain import OpenAI
+    from langchain.chains import RetrievalQA
+    chain_type_kwargs = {"prompt": PROMPT}
+    chain = RetrievalQA.from_chain_type(llm=OpenAI(model_name="gpt-3.5-turbo",max_tokens=500,temperature=0), chain_type="stuff", retriever=docsearch.as_retriever(), chain_type_kwargs=chain_type_kwargs,verbose=True,return_source_documents=True)
+
+    # chain = VectorDBQA.from_chain_type(llm=OpenAI(model_name="gpt-3.5-turbo",max_tokens=500,temperature=0), chain_type="stuff", vectorstore=docsearch,return_source_documents=True)
     print(docsearch.similarity_search("我该如何请假",k=4))
     app.run(host="0.0.0.0", port=PORT, debug=False)
